@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "Browser renders scoring with live data",
+    "Browser renders writer with live data",
+    "Browser renders system with live data",
+    "Browser renders business with live data",
+    "Browser applies state and merchant with apostrophe",
+    "Active model panel displays current version name"
+  ],
+  "state": "NY",
+  "merchant": "fraud_O'Keefe-Hudson",
+  "javascript_errors": [],
+  "http_errors": [],
+  "success": true
+}

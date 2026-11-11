@@ -1,0 +1,213 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "fraud-service",
+      "folder": "Fraud Monitoring",
+      "interval": "10s",
+      "rules": [
+        {
+          "uid": "fraud-high-ratio",
+          "title": "Fraud ratio above 20%",
+          "condition": "B",
+          "for": "10s",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "labels": {
+            "service": "scorer",
+            "severity": "warning"
+          },
+          "annotations": {
+            "summary": "Fraud ratio above 20%",
+            "__dashboardUid__": "fraud-scoring",
+            "__panelId__": "3"
+          },
+          "data": [
+            {
+              "refId": "A",
+              "datasourceUid": "prometheus",
+              "relativeTimeRange": {
+                "from": 120,
+                "to": 0
+              },
+              "model": {
+                "refId": "A",
+                "expr": "sum(rate(fraud_flagged_total[1m])) / clamp_min(sum(rate(fraud_scored_total[1m])), 0.001)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200,
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                }
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0.2
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "B"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "uid": "fraud-stopped-stream",
+          "title": "No successful scoring for 20 seconds",
+          "condition": "B",
+          "for": "10s",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "labels": {
+            "service": "scorer",
+            "severity": "warning"
+          },
+          "annotations": {
+            "summary": "No successful scoring for 20 seconds",
+            "__dashboardUid__": "fraud-scoring",
+            "__panelId__": "7"
+          },
+          "data": [
+            {
+              "refId": "A",
+              "datasourceUid": "prometheus",
+              "relativeTimeRange": {
+                "from": 120,
+                "to": 0
+              },
+              "model": {
+                "refId": "A",
+                "expr": "time() - max(fraud_last_success_timestamp_seconds)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200,
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                }
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        20
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "B"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "muteTimes": [
+    {
+      "orgId": 1,
+      "name": "local-status-only",
+      "time_intervals": [
+        {
+          "times": [
+            {
+              "start_time": "00:00",
+              "end_time": "24:00"
+            }
+          ],
+          "location": "UTC"
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "orgId": 1,
+      "receiver": "grafana-default-email",
+      "group_by": [
+        "grafana_folder",
+        "alertname"
+      ],
+      "routes": [
+        {
+          "receiver": "grafana-default-email",
+          "object_matchers": [
+            [
+              "service",
+              "=",
+              "scorer"
+            ]
+          ],
+          "mute_time_intervals": [
+            "local-status-only"
+          ]
+        }
+      ]
+    }
+  ]
+}

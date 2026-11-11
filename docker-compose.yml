@@ -1,0 +1,236 @@
+name: fraud-monitoring
+
+x-app: &app
+  image: fraud-monitoring-app:local
+  build: .
+  environment: &app-env
+    ARTIFACT_ROOT: /artifacts
+    SCORES_DSN: postgresql://fraud:fraud@postgres:5432/fraud
+  volumes:
+    - artifacts:/artifacts
+  restart: unless-stopped
+
+x-airflow: &airflow
+  image: fraud-monitoring-airflow:local
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__WEBSERVER__SECRET_KEY: homework-local-secret
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__CORE__PARALLELISM: '2'
+    ARTIFACT_ROOT: /artifacts
+    BATCH_SIZE: '3000'
+    HISTORY_MONTHS: '36'
+  volumes:
+    - artifacts:/artifacts
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    airflow-init:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fraud
+      POSTGRES_PASSWORD: fraud
+      POSTGRES_DB: fraud
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fraud -d fraud']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  artifacts-init:
+    image: alpine:3.21
+    volumes:
+      - artifacts:/artifacts
+    command: ['sh', '-c', 'mkdir -p /artifacts/models /artifacts/reports /artifacts/runs && chmod -R a+rwX /artifacts']
+
+  warehouse-init:
+    <<: *app
+    user: '50000:0'
+    restart: 'no'
+    command: ['python', '-c', 'from pipeline.tasks import initialize; initialize()']
+    depends_on:
+      artifacts-init:
+        condition: service_completed_successfully
+
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_RETENTION_HOURS: 24
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list']
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ['/bin/bash', '-ec']
+    command:
+      - >-
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic transactions --partitions 1 --replication-factor 1;
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic scores --partitions 1 --replication-factor 1
+
+  scorer:
+    <<: *app
+    user: '50000:0'
+    environment:
+      <<: *app-env
+      STREAM_ROLE: score
+    ports:
+      - '127.0.0.1:8000:8000'
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8000/metrics")']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      warehouse-init:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+
+  writer:
+    <<: *app
+    command: ['python', '-m', 'services.writer']
+    ports:
+      - '127.0.0.1:8001:8001'
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8001/metrics")']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  simulator:
+    <<: *app
+    environment:
+      <<: *app-env
+      STREAM_ROLE: simulate
+      STREAM_INTERVAL: '0.2'
+    depends_on:
+      scorer:
+        condition: service_healthy
+      writer:
+        condition: service_healthy
+
+  airflow-init:
+    <<: *airflow
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      warehouse-init:
+        condition: service_completed_successfully
+    command:
+      - bash
+      - -ec
+      - >-
+        airflow db migrate;
+        airflow users list --output json | python -c 'import json,sys; sys.exit(0 if any(u["username"] == "admin" for u in json.load(sys.stdin)) else 1)' ||
+        airflow users create --username admin --password admin --firstname Local --lastname Admin --role Admin --email admin@example.org
+
+  airflow-webserver:
+    <<: *airflow
+    command: webserver
+    ports:
+      - '127.0.0.1:8083:8080'
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8080/health']
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  airflow-scheduler:
+    <<: *airflow
+    command: scheduler
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8974/health']
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.retention.time=7d']
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:9090:9090'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 1s
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: Europe/Moscow
+      GF_UNIFIED_ALERTING_MIN_INTERVAL: 10s
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    entrypoint: ['/bin/sh', '/etc/node-exporter/start.sh']
+    command: ['--path.rootfs=/host', '--path.procfs=/host/proc', '--path.sysfs=/host/sys', '--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($$|/)']
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+      - ./node-exporter/start.sh:/etc/node-exporter/start.sh:ro
+    restart: unless-stopped
+
+volumes:
+  artifacts:
+  postgres-data:
+  kafka-data:
+  airflow-logs:
+  prometheus-data:
+  grafana-data:

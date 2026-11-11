@@ -1,0 +1,30 @@
+{
+  "checks": [
+    "Prometheus has three live targets",
+    "Grafana healthy",
+    "Live Kafka input grows scoring and writer counters",
+    "All four dashboards and every panel have live data",
+    "PostgreSQL state/merchant filters and normalized density work",
+    "Two Grafana alert rules provisioned",
+    "Airflow DAG supply_labeled_month",
+    "Airflow DAG dataset_quality",
+    "Airflow DAG retrain_fraud_model",
+    "Hot reload counter appears",
+    "New model annotation is visible for 30s",
+    "PostgreSQL receives new model version",
+    "PostgreSQL primary key ignores duplicate scores",
+    "Grafana high fraud alert fires",
+    "Grafana stopped stream alert fires",
+    "Grafana alerts recover"
+  ],
+  "segment": {
+    "state": "NM",
+    "merchant": "fraud_Hamill-D'Amore"
+  },
+  "model_versions": [
+    "bootstrap",
+    "model-edccf1bffa5ad3c77151"
+  ],
+  "finished_at": "2026-11-11T22:03:45.449333+00:00",
+  "success": true
+}

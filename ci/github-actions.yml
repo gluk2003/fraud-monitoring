@@ -1,0 +1,32 @@
+name: monitoring-checks
+on: [push, pull_request]
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt pytest
+      - run: pytest -q
+      - run: python scripts/build_dashboards.py && git diff --exit-code -- grafana
+      - run: docker compose config --quiet
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build
+      - run: docker compose exec -T airflow-scheduler airflow dags list-import-errors
+      - run: python3 scripts/verify_stack.py --alerts
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=120
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: monitoring-verification
+          path: artifacts/verification.json
+      - run: docker compose down -v
+        if: always()

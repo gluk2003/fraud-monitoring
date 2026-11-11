@@ -1,0 +1,408 @@
+{
+  "uid": "fraud-business",
+  "title": "04 · Бизнес и сегменты",
+  "schemaVersion": 40,
+  "version": 1,
+  "editable": true,
+  "tags": [
+    "hw4",
+    "fraud"
+  ],
+  "timezone": "browser",
+  "refresh": "2s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "Плотность распределения скоров · state / merch",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "WITH selected AS (SELECT least(19, floor(score * 20)::int) AS bin FROM scores\n        WHERE $__timeFilter(scored_at) AND ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) AND ('__all' IN (${merchant:sqlstring}) OR merch IN (${merchant:sqlstring}))),\n        counts AS (SELECT bin, count(*) AS n FROM selected GROUP BY bin)\n        SELECT to_char(b / 20.0, 'FM0.00') || '–' || to_char((b+1) / 20.0, 'FM0.00') AS score_bin,\n        coalesce(n, 0)::float / greatest((SELECT count(*) FROM selected), 1) / 0.05 AS density\n        FROM generate_series(0,19) b LEFT JOIN counts ON bin=b ORDER BY b",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          }
+        }
+      ],
+      "description": "20 интервалов ширины 0.05. Высота=count/(N×0.05), площадь равна 1 при N>0. Последний интервал включает score=1. Фильтры применяются ко всему выбранному времени.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "showValue": "auto",
+        "groupWidth": 0.85,
+        "barWidth": 0.9,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "xTickLabelRotation": -30
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "TPS обработки · state / merch",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroupAlias(scored_at,'5s',0), count(*) / 5.0 AS tps FROM scores WHERE $__timeFilter(scored_at) AND ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) AND ('__all' IN (${merchant:sqlstring}) OR merch IN (${merchant:sqlstring})) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          }
+        }
+      ],
+      "description": "Время фактического скоринга, интервалы 5 секунд. SQL видит результаты после записи writer.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Доля фрода по категории · последние 1000",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "WITH last_1000 AS (SELECT * FROM scores ORDER BY scored_at DESC, transaction_id DESC LIMIT 1000)\n        SELECT cat_id, avg(fraud_flag::int) AS fraud_ratio FROM last_1000 WHERE ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) AND ('__all' IN (${merchant:sqlstring}) OR merch IN (${merchant:sqlstring}))\n        GROUP BY cat_id ORDER BY fraud_ratio DESC",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          }
+        }
+      ],
+      "description": "Последние 1000 уникальных результатов глобально, затем фильтры state/merch. Диапазон времени не ограничивает это окно; пока строк меньше 1000, используется доступное количество.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "showValue": "auto",
+        "groupWidth": 0.85,
+        "barWidth": 0.9,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "xTickLabelRotation": -30
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Топ продавцов по сумме подозрительных покупок",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT merch, sum(amount) FILTER (WHERE fraud_flag) AS flagged_amount FROM scores WHERE $__timeFilter(scored_at) AND ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) AND ('__all' IN (${merchant:sqlstring}) OR merch IN (${merchant:sqlstring})) GROUP BY merch HAVING bool_or(fraud_flag) ORDER BY flagged_amount DESC LIMIT 10",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          }
+        }
+      ],
+      "description": "Дополнительный бизнес-график: помогает приоритизировать расследования по объёму подозрительных покупок. Это предсказания модели, не подтверждённые потери.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "showValue": "auto",
+        "groupWidth": 0.85,
+        "barWidth": 0.9,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "xTickLabelRotation": -30
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Скоры и доля фрода по версии · выбранный сегмент",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT model_version, count(*) AS scores, avg(fraud_flag::int) AS fraud_ratio, sum(amount) FILTER (WHERE fraud_flag) AS flagged_amount FROM scores WHERE $__timeFilter(scored_at) AND ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) AND ('__all' IN (${merchant:sqlstring}) OR merch IN (${merchant:sqlstring})) GROUP BY model_version ORDER BY model_version",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          }
+        }
+      ],
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Размер сегмента",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count(*) AS scores FROM scores WHERE $__timeFilter(scored_at) AND ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) AND ('__all' IN (${merchant:sqlstring}) OR merch IN (${merchant:sqlstring}))",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          }
+        }
+      ],
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 9
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "state",
+        "label": "Штат · us_state",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "postgres"
+        },
+        "query": "SELECT DISTINCT us_state AS __text, us_state AS __value FROM scores ORDER BY 1",
+        "definition": "SELECT DISTINCT us_state AS __text, us_state AS __value FROM scores ORDER BY 1",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "sort": 1,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "merchant",
+        "label": "Продавец · merch",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "postgres"
+        },
+        "query": "SELECT DISTINCT merch AS __text, merch AS __value FROM scores WHERE ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) ORDER BY 1",
+        "definition": "SELECT DISTINCT merch AS __text, merch AS __value FROM scores WHERE ('__all' IN (${state:sqlstring}) OR us_state IN (${state:sqlstring})) ORDER BY 1",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "'__all'",
+        "sort": 1,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Scoring",
+      "url": "/d/fraud-scoring"
+    },
+    {
+      "title": "Writer",
+      "url": "/d/fraud-writer"
+    },
+    {
+      "title": "System",
+      "url": "/d/fraud-system"
+    },
+    {
+      "title": "Business",
+      "url": "/d/fraud-business"
+    }
+  ]
+}
